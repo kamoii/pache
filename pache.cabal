@@ -32,5 +32,6 @@ executable pache
                      , text
                      , bytestring
                      , ghc
+                     , containers
   hs-source-dirs:      app
   default-language:    Haskell2010
