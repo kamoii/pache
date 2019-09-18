@@ -1,0 +1,5 @@
+Needs cabal-install 3.0.0.0
+分からんが 2.4.0.1 だと Cabal 2.4.0.1 をビルドしようとして失敗する
+
+
+: $ cabal new-build exe:pache --allow-newer

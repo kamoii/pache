@@ -1,0 +1,27 @@
+source-repository-package
+    type: git
+    location: https://github.com/kamoii/replica.git
+    tag: fc75b5009471e3a2ac9408ca52bb731d8e96079f
+
+source-repository-package
+    type: git
+    location: https://github.com/kamoii/concur-replica.git
+    tag: 984822808dc76b350e37f1cf4d88e5731d1e9ca7
+
+source-repository-package
+    type: git
+    location: https://github.com/kamoii/websockets.git
+    tag: 848638ae607923c5486354ef7a401d2331439c4b
+
+source-repository-package
+    type: git
+    location: https://github.com/andrewthad/chronos.git
+    tag: 4141542959484e46279cd5f8d7ba00317defd2bd
+
+source-repository-package
+    type: git
+    location: https://github.com/ajnsit/concur
+    tag: deef7cf42d193147abefb7f3b7ad2748a16368b8
+    subdir: concur-core
+
+packages: ./pache.cabal
