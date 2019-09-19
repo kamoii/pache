@@ -42,7 +42,8 @@ main' hiePath = do
 
     renderer :: HieAST i -> Bool -> Widget HTML v
     renderer ast _ = do
-      div [] [ text "test" ]
+      let span = show $ nodeSpan ast
+      div [] [ text span ]
 
 treeView
   :: (forall v. a -> Bool -> Widget HTML v)
@@ -51,19 +52,31 @@ treeView
 treeView renderer root = render (TZ.zipper root)
   where
     renderer' tz isSelected = do
-      renderer (TZ.current tz) isSelected
+      div [ style [("border", "1px solid gray")]]
+        [ renderer (TZ.current tz) isSelected
+        , whenJustA (TZ.downToFirstChild tz) $ \ctz -> button [ ctz <$ onClick ] [ text "cildren" ]
+        ]
 
     render zp = do
       let before = reverse $ unfoldr (dupe <<$>> TZ.siblingBefore) zp
       let after  = unfoldr (dupe <<$>> TZ.siblingAfter) zp
       let all    = zip before [False ..] <> ((zp, True) : zip after [False ..])
-      orr $ map (uncurry renderer') all
+      zp' <- div []
+        [ whenJustA (TZ.up zp) $ \ctz -> button [ ctz <$ onClick ] [ text "parent" ]
+        , div [] (map (uncurry renderer') all)
+        ]
+      render zp'
 
 -- https://gitlab.haskell.org/ghc/ghc/wikis/hie-files#reading-hie-files
 makeNc :: IO NameCache
 makeNc = do
   uniqSupply <- mkSplitUniqSupply 'z'
   return $ initNameCache uniqSupply []
+
+whenJustA :: Alternative m => Maybe a -> (a -> m v) -> m v
+whenJustA m f = case m of
+  Just a -> f a
+  Nothing -> empty
 
 -- Local Variables:
 -- dante-repl-command-line: ("cabal" "new-repl" "exe:pache" "--allow-newer")
