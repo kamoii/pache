@@ -25,7 +25,7 @@ library
 
 executable pache
   main-is:             Main.hs
-  -- other-modules:
+  other-modules:       Data.TreeZipper
   -- other-extensions:
   build-depends:       base ^>=4.13.0.0
                      , relude
@@ -33,6 +33,7 @@ executable pache
                      , bytestring
                      , ghc
                      , containers
+                     , concur-core
                      , concur-replica
                      , replica
   hs-source-dirs:      app
