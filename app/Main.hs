@@ -60,7 +60,7 @@ treeView renderer root = render (TZ.zipper root)
     render zp = do
       let before = reverse $ unfoldr (dupe <<$>> TZ.siblingBefore) zp
       let after  = unfoldr (dupe <<$>> TZ.siblingAfter) zp
-      let all    = zip before [False ..] <> ((zp, True) : zip after [False ..])
+      let all    = zip before (repeat False) <> [(zp, True)] <> zip after (repeat False)
       zp' <- div []
         [ whenJustA (TZ.up zp) $ \ctz -> button [ ctz <$ onClick ] [ text "parent" ]
         , div [] (map (uncurry renderer') all)
