@@ -35,8 +35,8 @@ main' hiePath = do
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ h1 [ style [ ("grid-row", "1") ] ] [ text "fooo" ]
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
-        [ div [style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ treeView renderer (toTree ast) ]
-        , div [style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView $ decodeUtf8 $ hie_hs_src hieFile ]
+        [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ treeView renderer (toTree ast) ]
+        , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView $ decodeUtf8 $ hie_hs_src hieFile ]
         ]
       ]
   where
@@ -46,7 +46,8 @@ main' hiePath = do
     renderer :: HieAST i -> Bool -> Widget HTML v
     renderer ast _ = do
       let span = show $ nodeSpan ast
-      div [] [ text span ]
+      let anot = show $ nodeAnnotations $ nodeInfo ast
+      div [] [ text anot ]
 
 sourceView
   :: Text
@@ -54,6 +55,10 @@ sourceView
 sourceView src = do
   pre [] [ text src ]
 
+{-
+親に戻る時にスクロール位置が一番上に戻ってしまう...
+上の階層のdivを消さずに div を重ねるていくほうがいいのかな？
+-}
 treeView
   :: (forall v. a -> Bool -> Widget HTML v)
   -> Tree a
