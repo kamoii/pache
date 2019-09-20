@@ -32,9 +32,12 @@ main' hiePath = do
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
   runDefault 8080 "hie explorer" $ do
-    main_ []
-      [ h1 [] [ text "fooo" ]
-      , div [] [ treeView renderer (toTree ast) ]
+    main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
+      [ h1 [ style [ ("grid-row", "1") ] ] [ text "fooo" ]
+      , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
+        [ div [style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ treeView renderer (toTree ast) ]
+        , div [style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView $ decodeUtf8 $ hie_hs_src hieFile ]
+        ]
       ]
   where
     toTree :: HieAST i -> Tree (HieAST i)
@@ -45,6 +48,12 @@ main' hiePath = do
       let span = show $ nodeSpan ast
       div [] [ text span ]
 
+sourceView
+  :: Text
+  -> Widget HTML v
+sourceView src = do
+  pre [] [ text src ]
+
 treeView
   :: (forall v. a -> Bool -> Widget HTML v)
   -> Tree a
@@ -52,7 +61,7 @@ treeView
 treeView renderer root = render (TZ.zipper root)
   where
     renderer' tz isSelected = do
-      div [ style [("border", "1px solid gray")]]
+      div [ style [("border", "1px solid gray"), ("margin-bottom", "0.5rem")]]
         [ renderer (TZ.current tz) isSelected
         , whenJustA (TZ.downToFirstChild tz) $ \ctz -> button [ ctz <$ onClick ] [ text "cildren" ]
         ]
