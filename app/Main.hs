@@ -53,7 +53,7 @@ sourceView
   :: Text
   -> Widget HTML v
 sourceView src = do
-  pre [] [ text src ]
+ div [ style [ ("white-space", "pre"), ("font-family", "monospace") ] ] [ text src ]
 
 {-
 親に戻る時にスクロール位置が一番上に戻ってしまう...
