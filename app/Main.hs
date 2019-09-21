@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE BlockArguments #-}
 module Main where
 
 import Prelude()
@@ -7,11 +8,13 @@ import Relude hiding (div)
 import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
+import Module (Module(..), moduleStableString, moduleNameString, moduleName, moduleUnitId, unitIdString)
 import NameCache (NameCache, initNameCache)
 import UniqSupply (mkSplitUniqSupply)
 import SrcLoc
 import System.Environment (getArgs)
 import Data.Tree (Tree(Node))
+import qualified Data.Char as C
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Concur.Core
@@ -19,6 +22,7 @@ import Concur.Replica
 import Concur.Replica.Run (runDefault)
 import qualified Data.TreeZipper as TZ
 import Control.Concurrent.STM.TChan
+import qualified Text.ParserCombinators.ReadP as RP
 
 main :: IO ()
 main = do
@@ -30,6 +34,7 @@ main' hiePath = do
   (hieFileResult, nc') <- readHieFile nc hiePath
   let hieFile = hie_file_result hieFileResult
   let filePath = hie_hs_file hieFile
+  let module' = hie_module hieFile
   let asts = hie_asts hieFile
   let [ast] = M.elems $ getAsts asts
   putStrLn $ "hieFile read!! from: " <> filePath
@@ -37,13 +42,21 @@ main' hiePath = do
   runDefault 8080 "hie explorer" $ do
     (dy, tree_) <- unsafeBlockingIO $ atomically $ treeView renderer (toTree ast)
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
-      [ h1 [ style [ ("grid-row", "1") ] ] [ text "fooo" ]
+      [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
         [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ tree_ ]
         , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView (decodeUtf8 (hie_hs_src hieFile)) (getSpan <$> dy) ]
         ]
       ]
   where
+    header_ module' = do
+      let modname = moduleNameString $ moduleName module'
+      let unitId = unitIdString $ moduleUnitId module'
+      h1 [ style [ ("grid-row", "1") ] ]
+        [ text (toText modname)
+        , text $ "(" <> toText unitId <> ")"
+        ]
+
     toTree :: HieAST i -> Tree (HieAST i)
     toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
 
@@ -58,18 +71,58 @@ main' hiePath = do
       in ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
          , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
          )
-{-
-0-index
--}
+
+-- | Extract package information from `Module` type
+--
+-- Given a HIE file, only inforamtion you can get related to package
+-- name and version is `hie_module :: Module`. Inside `Module` type,
+-- there is a `UnitId`. UnitId has two constructor, but for HIE files,
+-- (1)constructor should be `DefiniteUnitId DefUnitId`, which is
+-- essentially a String.
+--
+-- This String should have following format(2):
+--
+--   <package name>-<version>-<hash(length 64)>
+--   e.g. attoparsec-0.13.2.3-c26ea5327ea5e6e18a489b8b0eafa786f8941a0f85bf09f83aa8c5760fca2d79
+--
+-- NOTE: (1), (2) is an assume I made. It maybe wrong.
+data Package = Package
+  { packageName :: String
+  , packageVersion :: String
+  , packageHash :: String
+  } deriving (Eq, Ord, Show)
+
+modulePackage :: Module -> Package
+modulePackage mod =
+  let
+    unitId = unitIdString $ moduleUnitId mod
+    result = RP.readP_to_S parsePackage unitId
+  in
+    case result of
+      [(package,"")] -> package
+      _ -> error "Assumction about unitId broke"
+
+-- e.g. attoparsec-0.13.2.3-c26ea5327ea5e6e18a489b8b0eafa786f8941a0f85bf09f83aa8c5760fca2d79
+parsePackage :: RP.ReadP Package
+parsePackage =
+  Package
+    <$> do RP.many1 (RP.satisfy $ C.isAlphaNum ||^ (=='_') ||^ (=='-'))
+    <*> do RP.char '-' *> RP.munch1 (C.isNumber ||^ (=='.'))
+    <*> do RP.char '-' *> RP.count 64 (RP.satisfy C.isAlphaNum) <* RP.eof
+
 sourceView
   :: Text
-  -> Dynamic ((Int,Int), (Int,Int))
+  -> Dynamic ((Int,Int), (Int,Int))  -- 0-index
   -> Widget HTML v
 sourceView src dyHlSpan = do
   let lines = T.lines src
-  onDynamic dyHlSpan $ \sp -> div [] $ map (div [ lineStyle ] . lineBody_ sp) $ zip [0..] lines
+  onDynamic dyHlSpan
+    $ \sp -> div [ containerStyle_ ]
+    $ map (div [ lineStyle_ ] . lineBody_ sp) $ zip [0..] lines
   where
-    lineStyle = style [ ("white-space", "pre"), ("font-family", "monospace") ]
+    containerStyle_ = style [ ("padding", "1rem") ]
+    lineStyle_ = style [ ("white-space", "pre"), ("font-family", "monospace") ]
+    hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
     lineBody_ ((startLineNo, startCol), (endLineNo, endCol)) (lineNo, txt)
       | endLineNo < lineNo || lineNo < startLineNo = [ text txt ]
       | startLineNo < lineNo && lineNo < endLineNo = [ hl_ txt ]
@@ -79,8 +132,6 @@ sourceView src dyHlSpan = do
         let (a,b') = T.splitAt startCol txt
             (b, c) = T.splitAt (endCol - startCol) b'
         in [ text a, hl_ b, text c ]
-
-    hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
 
 {-
 親に戻る時にスクロール位置が一番上に戻ってしまう...
