@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import Prelude()
@@ -50,11 +51,11 @@ main' hiePath = do
       ]
   where
     header_ module' = do
+      let Package{..} = modulePackage module'
       let modname = moduleNameString $ moduleName module'
-      let unitId = unitIdString $ moduleUnitId module'
       h1 [ style [ ("grid-row", "1") ] ]
         [ text (toText modname)
-        , text $ "(" <> toText unitId <> ")"
+        , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
         ]
 
     toTree :: HieAST i -> Tree (HieAST i)
