@@ -2,6 +2,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 module Main where
 
 import Prelude()
@@ -22,12 +25,17 @@ import qualified Data.Char as C
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Data.Tree as Tr
 import Concur.Core
 import Concur.Replica
-import Concur.Replica.Run (runDefault)
+import Concur.Replica.Run (run, mkDefaultConfig)
 import qualified Data.TreeZipper as TZ
+import Control.Concurrent.STM (retry)
 import Control.Concurrent.STM.TChan
 import qualified Text.ParserCombinators.ReadP as RP
+import Stitch
+import Optics
+import Data.Tree.Optics
 
 main :: IO ()
 main = do
@@ -44,13 +52,17 @@ main' hiePath = do
   let [ast] = M.elems $ getAsts asts
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
-  runDefault 8080 "hie explorer" $ do
-    (dy, tree_) <- unsafeBlockingIO $ atomically $ treeView renderHieAST (toTree ast)
+  let header = [ VNode "style" (fromList [("type", AText "text/css")]) [ VRawText cssStyle ] ]
+  let cnf' = mkDefaultConfig 8080 "hie-viewer"
+  let cnf = cnf' { cfgHeader = header }
+  run cnf \_ -> do
+    (_dy, tree_) <- unsafeBlockingIO $ atomically $ treeView2 renderHieAST (toTree ast)
+    let dy = constDynamic ((0,0),(0,0))
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
         [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ tree_ ]
-        , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView (decodeUtf8 (hie_hs_src hieFile)) (getSpan <$> dy) ]
+        , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView (decodeUtf8 (hie_hs_src hieFile)) dy ]
         ]
       ]
   where
@@ -71,8 +83,17 @@ main' hiePath = do
          , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
          )
 
-renderHieAST :: HieAST i -> Bool -> Widget HTML v
-renderHieAST ast _ = do
+-- css
+cssStyle :: Text
+cssStyle = renderCSS do
+  ".ident-table" ? do
+    "border-collapse" .= "collapse"
+    "border" .= "1px solid black"
+    "td" ? "border" .= "1px solid black"
+    "th" ? "border" .= "1px solid black"
+
+renderHieAST :: HieAST i -> Widget HTML v
+renderHieAST ast = do
   let ni = nodeInfo ast
   table []
     [ tr [] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
@@ -92,13 +113,15 @@ renderHieAST ast _ = do
       | M.null idents = text "[]"
       | otherwise = do
           let th_ label = th [] [ text label ]
-          table []
+          table [ className "ident-table" ]
             $ [ tr [] [ th_ "name", th_ "name space", th_ "name sort", th_ "uniq" ] ]
             <> map renderIdentTr (M.toList idents)
 
     renderIdentTr (ident, detail) =
       case ident of
-        Left moduleName -> error "??"
+        Left moduleName ->
+          tr []
+            [ td [ colspan "4" ] [ text (toText $ moduleNameString moduleName <> "(module name)") ] ]
         Right name ->
           tr [] $ map (\t -> td [] [ text (toText t) ])
             [ occNameString $ nameOccName name
@@ -185,8 +208,45 @@ sourceView src dyHlSpan = do
       where
         hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
 
+{-
+tree view状態をどのように表現するかが肝。
+基本的に開閉状態かな？
+Tree (Bool, a) にするか
+-}
+treeView2
+  :: (forall v. a -> Widget HTML v)
+  -> Tree a
+  -> STM (Dynamic (Tree (Bool,a)), Widget HTML v)
+treeView2 renderer tree = do
+  let tree' = (False,) <$> tree
+  (dy, update) <- mkDynamic tree'
+  pure (dy, go tree' update)
+  where
+    go root update = do
+      newRoot <- renderNode root
+      unsafeBlockingIO $ atomically $ update newRoot
+      go newRoot update
+
+    renderNode node = do
+      let (isOpen, a) = node ^. root
+      div []
+        [ div [ rootStyle_ ]
+          [ renderer a
+          , whenA (hasChild node)
+            $ button [ (node & root % _1 %~ not) <$ onClick ] [ text "child toggle" ]
+          ]
+        , whenA (isOpen && hasChild node)
+          $ div [ childrenStyle_ ]
+          $ flip map (zip [0..] (node ^. branches))
+          $ \(i, childNode) -> (\c -> set (branches % ix i) c node) <$> renderNode childNode
+        ]
+      where
+        rootStyle_ = style [ ("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
+        childrenStyle_ = style [ ("margin-left", "2em") ]
+        hasChild node = not . null $ node ^. branches
 
 {-
+実装は簡単だし、効率も悪くないが、使いがって見やすさに問題がある。
 親に戻る時にスクロール位置が一番上に戻ってしまう...
 上の階層のdivを消さずに div を重ねるていくほうがいいのかな？
 -}
@@ -226,6 +286,9 @@ makeNc = do
   uniqSupply <- mkSplitUniqSupply 'z'
   return $ initNameCache uniqSupply []
 
+whenA :: Alternative m => Bool -> m v -> m v
+whenA b m = bool empty m b
+
 whenJustA :: Alternative m => Maybe a -> (a -> m v) -> m v
 whenJustA m f = case m of
   Just a -> f a
@@ -246,6 +309,9 @@ mkDynamic init = do
     ( Dynamic (readTVar var) (dupTChan chan >>= pure . readTChan)
     , \a -> writeTVar var a *> writeTChan chan a
     )
+
+constDynamic :: a -> Dynamic a
+constDynamic a = Dynamic (pure a) (pure retry)
 
 -- TChan a is a read-only TChan a. Writing will hang.
 readDynamic :: Dynamic a -> STM (a, STM a)

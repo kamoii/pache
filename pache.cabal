@@ -29,9 +29,11 @@ executable pache
   -- other-extensions:
   build-depends:       base ^>=4.13.0.0
                      , relude
+                     , optics
                      , stm
                      , text
                      , bytestring
+                     , stitch
                      , ghc
                      , containers
                      , concur-core
