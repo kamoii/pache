@@ -9,6 +9,8 @@ import Relude hiding (div)
 import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
+import Name (nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
+import OccName (occNameString, occNameSpace)
 import Module (Module(..), moduleStableString, moduleNameString, moduleName, moduleUnitId, unitIdString)
 import NameCache (NameCache, initNameCache)
 import UniqSupply (mkSplitUniqSupply)
@@ -65,7 +67,27 @@ main' hiePath = do
     renderer ast _ = do
       let span = show $ nodeSpan ast
       let anot = show $ nodeAnnotations $ nodeInfo ast
-      div [] [ text anot ]
+      let names = M.keys $ nodeIdentifiers $ nodeInfo ast
+      div []
+        [ div [] [ text anot ]
+        , div [] [ text $ show $ map (first moduleNameString . second showName) names ]
+        ]
+      where
+        showName n =
+          let
+            occN = occNameString $ nameOccName n
+            occNS = showNameSpace $ occNameSpace $ nameOccName n
+            uniq = show $ nameUnique n
+          in
+            "[" <> occNS <> "] " <> occN <> " (" <> uniq <> ")"
+
+        -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
+        showNameSpace ns
+          | ns == dataName  = "data constructor"
+          | ns == tcClsName = "type constructor or class"
+          | ns == tvName    = "type variable"
+          | ns == varName   = "variable"
+          | otherwise      = error "New NameSpace was added?"
 
     getSpan ast =
       let s = nodeSpan ast
@@ -117,13 +139,18 @@ sourceView
   -> Widget HTML v
 sourceView src dyHlSpan = do
   let lines = T.lines src
-  onDynamic dyHlSpan
-    $ \sp -> div [ containerStyle_ ]
-    $ map (div [ lineStyle_ ] . lineBody_ sp) $ zip [0..] lines
+  onDynamic dyHlSpan $ \sp -> container_ $ map (line_ sp) $ zip [0..] lines
   where
-    containerStyle_ = style [ ("padding", "1rem") ]
-    lineStyle_ = style [ ("white-space", "pre"), ("font-family", "monospace") ]
-    hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
+    container_ =
+      div [ style [ ("padding", "0.5em 0px") ] ]
+
+    line_ sp (i, txt) =
+      div
+        [ style [ ("white-space", "pre"), ("font-family", "monospace"), ("display", "grid"), ("grid-template-columns", "3em 1fr") ] ]
+        [ div [ style [ ("grid-column", "1"), ("text-align", "right"), ("padding", "0px 0.5em") ] ] [ text $ show (i+1) ]
+        , div [ style [ ("grid-column", "2") ] ] (lineBody_ sp (i,txt))
+        ]
+
     lineBody_ ((startLineNo, startCol), (endLineNo, endCol)) (lineNo, txt)
       | endLineNo < lineNo || lineNo < startLineNo = [ text txt ]
       | startLineNo < lineNo && lineNo < endLineNo = [ hl_ txt ]
@@ -133,6 +160,9 @@ sourceView src dyHlSpan = do
         let (a,b') = T.splitAt startCol txt
             (b, c) = T.splitAt (endCol - startCol) b'
         in [ text a, hl_ b, text c ]
+      where
+        hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
+
 
 {-
 親に戻る時にスクロール位置が一番上に戻ってしまう...
