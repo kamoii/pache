@@ -9,6 +9,7 @@ import Relude hiding (div)
 import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
+import FastString (unpackFS)
 import Name (nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
 import OccName (occNameString, occNameSpace)
 import Module (Module(..), moduleStableString, moduleNameString, moduleName, moduleUnitId, unitIdString)
@@ -19,6 +20,7 @@ import System.Environment (getArgs)
 import Data.Tree (Tree(Node))
 import qualified Data.Char as C
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Concur.Core
 import Concur.Replica
@@ -43,7 +45,7 @@ main' hiePath = do
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
   runDefault 8080 "hie explorer" $ do
-    (dy, tree_) <- unsafeBlockingIO $ atomically $ treeView renderer (toTree ast)
+    (dy, tree_) <- unsafeBlockingIO $ atomically $ treeView renderHieAST (toTree ast)
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
@@ -63,37 +65,57 @@ main' hiePath = do
     toTree :: HieAST i -> Tree (HieAST i)
     toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
 
-    renderer :: HieAST i -> Bool -> Widget HTML v
-    renderer ast _ = do
-      let span = show $ nodeSpan ast
-      let anot = show $ nodeAnnotations $ nodeInfo ast
-      let names = M.keys $ nodeIdentifiers $ nodeInfo ast
-      div []
-        [ div [] [ text anot ]
-        , div [] [ text $ show $ map (first moduleNameString . second showName) names ]
-        ]
-      where
-        showName n =
-          let
-            occN = occNameString $ nameOccName n
-            occNS = showNameSpace $ occNameSpace $ nameOccName n
-            uniq = show $ nameUnique n
-          in
-            "[" <> occNS <> "] " <> occN <> " (" <> uniq <> ")"
-
-        -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
-        showNameSpace ns
-          | ns == dataName  = "data constructor"
-          | ns == tcClsName = "type constructor or class"
-          | ns == tvName    = "type variable"
-          | ns == varName   = "variable"
-          | otherwise      = error "New NameSpace was added?"
-
     getSpan ast =
       let s = nodeSpan ast
       in ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
          , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
          )
+
+renderHieAST :: HieAST i -> Bool -> Widget HTML v
+renderHieAST ast _ = do
+  let ni = nodeInfo ast
+  table []
+    [ tr [] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
+    , tr [] [ th [] [ text "idents" ], td [] [ renderIdents (nodeIdentifiers ni) ] ]
+    ]
+  where
+    showAnnots annots =
+      if S.null annots
+         then "[]"
+         else intercalate ", " . map showAnnot $ S.toList annots
+
+    -- Each annotation is (FastString, FastString)
+    showAnnot (a, b) =
+      unpackFS a <> "/" <> unpackFS b
+
+    renderIdents idents
+      | M.null idents = text "[]"
+      | otherwise = do
+          let th_ label = th [] [ text label ]
+          table []
+            $ [ tr [] [ th_ "name", th_ "name space", th_ "name sort", th_ "uniq" ] ]
+            <> map renderIdentTr (M.toList idents)
+
+    renderIdentTr (ident, detail) =
+      case ident of
+        Left moduleName -> error "??"
+        Right name ->
+          tr [] $ map (\t -> td [] [ text (toText t) ])
+            [ occNameString $ nameOccName name
+            , showNameSpace $ occNameSpace $ nameOccName name
+            , ""
+            , show $ nameUnique name
+            ]
+
+    -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
+    showNameSpace ns
+      | ns == dataName  = "data constructor"
+      | ns == tcClsName = "type constructor or class"
+      | ns == tvName    = "type variable"
+      | ns == varName   = "variable"
+      | otherwise      = error "New NameSpace was added?"
+
+
 
 -- | Extract package information from `Module` type
 --
