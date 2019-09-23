@@ -139,16 +139,21 @@ renderHieAST dynFlags hieTypes ast = do
       | M.null idents = text "[]"
       | otherwise = table [] $ map renderIdentTr (M.toList idents)
 
-    renderIdentTr (ident, detail) =
+    renderIdentTr (ident, detail) = do
+      let detailTd = td []
+            [ text "context info:"
+            , br []
+            , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
+            , br []
+            , text "type:"
+            , br []
+            , text $ maybe "--" (toText . showType) (identType detail)
+            ]
       case ident of
         Left moduleName ->
           tr []
             [ th [colspan "2"] [ text (toText $ moduleNameString moduleName <> "(module name)") ]
-            , td []
-              [ text "context info:"
-              , br []
-              , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
-              ]
+            , detailTd
             ]
         Right name -> do
           tr []
@@ -159,11 +164,7 @@ renderHieAST dynFlags hieTypes ast = do
               , text $ "uniq: " <> show (nameUnique name)
               , text $ "span: " <> showSrcSpan (nameSrcSpan name)
               ]
-            , td []
-              [ text "context info:"
-              , br []
-              , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
-              ]
+            , detailTd
             ]
 
     -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
