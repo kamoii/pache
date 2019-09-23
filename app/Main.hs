@@ -12,6 +12,7 @@ import Relude hiding (div)
 import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
+import HieUtils
 import FastString (unpackFS)
 import Name (nameSrcSpan, nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
 import qualified Name as Name
@@ -38,12 +39,22 @@ import Stitch
 import Optics
 import Data.Tree.Optics
 
+import SysTools ( initSysTools )
+import DynFlags ( DynFlags, defaultDynFlags )
+import GHC.Paths (libdir)
+
+dynFlagsForPrinting :: IO DynFlags
+dynFlagsForPrinting = do
+  systemSettings <- initSysTools libdir
+  return $ defaultDynFlags systemSettings ([], [])
+
 main :: IO ()
 main = do
   [hiePath] <- getArgs
   main' hiePath
 
 main' hiePath = do
+  dynFlags <- dynFlagsForPrinting
   nc <- makeNc
   (hieFileResult, nc') <- readHieFile nc hiePath
   let hieFile = hie_file_result hieFileResult
@@ -60,7 +71,9 @@ main' hiePath = do
   let cnf' = mkDefaultConfig 8080 "hie-viewer"
   let cnf = cnf' { cfgHeader = header }
   run cnf \_ -> do
-    (dy', tree_) <- unsafeBlockingIO $ atomically $ treeView2 renderHieAST (toTree ast)
+    (dy', tree_) <- unsafeBlockingIO
+      $ atomically
+      $ treeView2 (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
     let dy = getSpan . nodeSpan <$> dy'
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
@@ -96,11 +109,12 @@ cssStyle = renderCSS do
     "td" ? "border" .= "1px solid black"
     "th" ? "border" .= "1px solid black"
 
-renderHieAST :: HieAST i -> Widget HTML v
-renderHieAST ast = do
+renderHieAST :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
+renderHieAST dynFlags hieTypes ast = do
   let ni = nodeInfo ast
   table []
     [ tr [] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
+    , tr [] [ th [] [ text "types"  ], td [] [ renderTypes (nodeType ni) ] ]
     , tr [] [ th [] [ text "idents" ], td [] [ renderIdents (nodeIdentifiers ni) ] ]
     ]
   where
@@ -113,24 +127,43 @@ renderHieAST ast = do
     showAnnot (a, b) =
       unpackFS a <> "/" <> unpackFS b
 
+    renderTypes types =
+      if null types
+         then text "[]"
+         else orr $ intersperse (br []) $ map (text . toText . showType) types
+
+    showType typeIndex =
+      renderHieType dynFlags $ recoverFullType typeIndex hieTypes
+
     renderIdents idents
       | M.null idents = text "[]"
-      | otherwise = ul [] $ map renderIdentLi (M.toList idents)
+      | otherwise = table [] $ map renderIdentTr (M.toList idents)
 
-    renderIdentLi (ident, detail) =
+    renderIdentTr (ident, detail) =
       case ident of
         Left moduleName ->
-          li []
-            [ text (toText $ moduleNameString moduleName <> "(module name)") ]
+          tr []
+            [ th [colspan "2"] [ text (toText $ moduleNameString moduleName <> "(module name)") ]
+            , td []
+              [ text "context info:"
+              , br []
+              , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
+              ]
+            ]
         Right name -> do
-          li []
-            [ b [] [ text . toText . occNameString $ nameOccName name ]
-            , text "("
-            , text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
-            , text $ ", name sort: " <> (showNameSort name)
-            , text $ ", uniq: " <> show (nameUnique name)
-            , text $ ", span: " <> showSrcSpan (nameSrcSpan name)
-            , text ")"
+          tr []
+            [ th [] [ text . toText . occNameString $ nameOccName name ]
+            , td [] $ intersperse (br [])
+              [ text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
+              , text $ "name sort: " <> (showNameSort name)
+              , text $ "uniq: " <> show (nameUnique name)
+              , text $ "span: " <> showSrcSpan (nameSrcSpan name)
+              ]
+            , td []
+              [ text "context info:"
+              , br []
+              , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
+              ]
             ]
 
     -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.

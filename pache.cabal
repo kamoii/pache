@@ -35,6 +35,7 @@ executable pache
                      , bytestring
                      , stitch
                      , ghc
+                     , ghc-paths
                      , containers
                      , concur-core
                      , concur-replica
