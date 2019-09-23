@@ -13,7 +13,8 @@ import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
 import FastString (unpackFS)
-import Name (nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
+import Name (nameSrcSpan, nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
+import qualified Name as Name
 import OccName (occNameString, occNameSpace)
 import Module (Module(..), moduleStableString, moduleNameString, moduleName, moduleUnitId, unitIdString)
 import NameCache (NameCache, initNameCache)
@@ -52,12 +53,15 @@ main' hiePath = do
   let [ast] = M.elems $ getAsts asts
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
-  let header = [ VNode "style" (fromList [("type", AText "text/css")]) [ VRawText cssStyle ] ]
+  let header =
+        [ VLeaf "link" $ fromList [ ("rel", AText "stylesheet"), ("href", AText "https://yarn.pm/normalize.css") ]
+        , VNode "style" (fromList [("type", AText "text/css")]) [ VRawText cssStyle ]
+        ]
   let cnf' = mkDefaultConfig 8080 "hie-viewer"
   let cnf = cnf' { cfgHeader = header }
   run cnf \_ -> do
-    (_dy, tree_) <- unsafeBlockingIO $ atomically $ treeView2 renderHieAST (toTree ast)
-    let dy = constDynamic ((0,0),(0,0))
+    (dy', tree_) <- unsafeBlockingIO $ atomically $ treeView2 renderHieAST (toTree ast)
+    let dy = getSpan . nodeSpan <$> dy'
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
@@ -77,11 +81,11 @@ main' hiePath = do
     toTree :: HieAST i -> Tree (HieAST i)
     toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
 
-    getSpan ast =
-      let s = nodeSpan ast
-      in ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
-         , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
-         )
+getSpan :: RealSrcSpan -> _
+getSpan s =
+  ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
+  , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
+  )
 
 -- css
 cssStyle :: Text
@@ -111,23 +115,22 @@ renderHieAST ast = do
 
     renderIdents idents
       | M.null idents = text "[]"
-      | otherwise = do
-          let th_ label = th [] [ text label ]
-          table [ className "ident-table" ]
-            $ [ tr [] [ th_ "name", th_ "name space", th_ "name sort", th_ "uniq" ] ]
-            <> map renderIdentTr (M.toList idents)
+      | otherwise = ul [] $ map renderIdentLi (M.toList idents)
 
-    renderIdentTr (ident, detail) =
+    renderIdentLi (ident, detail) =
       case ident of
         Left moduleName ->
-          tr []
-            [ td [ colspan "4" ] [ text (toText $ moduleNameString moduleName <> "(module name)") ] ]
-        Right name ->
-          tr [] $ map (\t -> td [] [ text (toText t) ])
-            [ occNameString $ nameOccName name
-            , showNameSpace $ occNameSpace $ nameOccName name
-            , ""
-            , show $ nameUnique name
+          li []
+            [ text (toText $ moduleNameString moduleName <> "(module name)") ]
+        Right name -> do
+          li []
+            [ b [] [ text . toText . occNameString $ nameOccName name ]
+            , text "("
+            , text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
+            , text $ ", name sort: " <> (showNameSort name)
+            , text $ ", uniq: " <> show (nameUnique name)
+            , text $ ", span: " <> showSrcSpan (nameSrcSpan name)
+            , text ")"
             ]
 
     -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
@@ -138,6 +141,16 @@ renderHieAST ast = do
       | ns == varName   = "variable"
       | otherwise      = error "New NameSpace was added?"
 
+    showNameSort name
+      | Name.isBuiltInSyntax name = "built-in-syntax"
+      | Name.isWiredInName name   = "wired-in"
+      | Name.isSystemName name    = "system"
+      | Name.isExternalName name  = "external"
+      | Name.isInternalName name  = "internal"
+      | otherwise                 = error "Unexpected name sort"
+
+    showSrcSpan (RealSrcSpan s) = show $ getSpan s
+    showSrcSpan (UnhelpfulSpan s) = toText $ unpackFS s
 
 
 -- | Extract package information from `Module` type
@@ -216,34 +229,33 @@ Tree (Bool, a) にするか
 treeView2
   :: (forall v. a -> Widget HTML v)
   -> Tree a
-  -> STM (Dynamic (Tree (Bool,a)), Widget HTML v)
+  -> STM (Dynamic a, Widget HTML v)
 treeView2 renderer tree = do
-  let tree' = (False,) <$> tree
-  (dy, update) <- mkDynamic tree'
-  pure (dy, go tree' update)
+  (dy, update) <- mkDynamic (tree ^. root)
+  pure (dy, go ((False,) <$> tree) update)
   where
-    go root update = do
-      newRoot <- renderNode root
-      unsafeBlockingIO $ atomically $ update newRoot
-      go newRoot update
+    go root update =
+      loopM_ root \root -> renderNode root update
 
-    renderNode node = do
+    renderNode node update = do
       let (isOpen, a) = node ^. root
       div []
         [ div [ rootStyle_ ]
           [ renderer a
           , whenA (hasChild node)
             $ button [ (node & root % _1 %~ not) <$ onClick ] [ text "child toggle" ]
+          , forever
+            $ button [ onClick ] [ text "hightlight" ] *> (unsafeBlockingIO $ atomically $ update a)
           ]
         , whenA (isOpen && hasChild node)
           $ div [ childrenStyle_ ]
           $ flip map (zip [0..] (node ^. branches))
-          $ \(i, childNode) -> (\c -> set (branches % ix i) c node) <$> renderNode childNode
+          $ \(i, childNode) -> (\c -> set (branches % ix i) c node) <$> renderNode childNode update
         ]
-      where
-        rootStyle_ = style [ ("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
-        childrenStyle_ = style [ ("margin-left", "2em") ]
-        hasChild node = not . null $ node ^. branches
+
+    rootStyle_ = style [ ("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
+    childrenStyle_ = style [ ("margin-left", "2em") ]
+    hasChild node = not . null $ node ^. branches
 
 {-
 実装は簡単だし、効率も悪くないが、使いがって見やすさに問題がある。
@@ -285,6 +297,10 @@ makeNc :: IO NameCache
 makeNc = do
   uniqSupply <- mkSplitUniqSupply 'z'
   return $ initNameCache uniqSupply []
+
+-- Same as `iterateM_` from `monad-loops`
+loopM_ :: Monad m => a -> (a -> m a) -> m v
+loopM_ a m = m a >>= \a' -> loopM_ a' m
 
 whenA :: Alternative m => Bool -> m v -> m v
 whenA b m = bool empty m b
