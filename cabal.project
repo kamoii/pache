@@ -1,7 +1,7 @@
 source-repository-package
     type: git
     location: https://github.com/kamoii/replica.git
-    tag: fc75b5009471e3a2ac9408ca52bb731d8e96079f
+    tag: 6f5573f8336be5bc6b8ed80aac31c0e3e738e7bb
 
 source-repository-package
     type: git
