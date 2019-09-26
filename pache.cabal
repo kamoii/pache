@@ -15,6 +15,11 @@ maintainer:          <>
 -- category:
 extra-source-files:  CHANGELOG.md
 
+-- flag Devel
+--     default: False
+--     description: Enable development dependencies
+--     manual: True
+
 library
   -- exposed-modules:
   -- other-modules:
@@ -40,5 +45,8 @@ executable pache
                      , concur-core
                      , concur-replica
                      , replica
+                     , rapid
+  -- if flag(devel)
+  --    build-depends:    rapid
   hs-source-dirs:      app
   default-language:    Haskell2010

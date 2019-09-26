@@ -38,6 +38,7 @@ import qualified Text.ParserCombinators.ReadP as RP
 import Stitch
 import Optics
 import Data.Tree.Optics
+import Rapid
 
 import SysTools ( initSysTools )
 import DynFlags ( DynFlags, defaultDynFlags )
@@ -52,6 +53,9 @@ main :: IO ()
 main = do
   [hiePath] <- getArgs
   main' hiePath
+
+up = rapid 0 \r -> do
+  restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
 
 main' hiePath = do
   dynFlags <- dynFlagsForPrinting
@@ -108,6 +112,11 @@ cssStyle = renderCSS do
     "border" .= "1px solid black"
     "td" ? "border" .= "1px solid black"
     "th" ? "border" .= "1px solid black"
+  ".context-info" ? do
+    "width" .= "12em"
+    "white-space" .= "nowrap"
+    "overflow" .= "hidden"
+    "text-overflow" .= "ellipsis"
 
 renderHieAST :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
 renderHieAST dynFlags hieTypes ast = do
@@ -141,9 +150,11 @@ renderHieAST dynFlags hieTypes ast = do
 
     renderIdentTr (ident, detail) = do
       let detailTd = td []
-            [ text "context info:"
+            [ b [] [ text "detail" ]
             , br []
-            , orr $ intersperse (br []) (map (text . show) $ S.toList $ identInfo detail)
+            , text "context info:"
+            , br []
+            , orr $ (map (contextInfo_ . show) $ S.toList $ identInfo detail)
             , br []
             , text "type:"
             , br []
@@ -159,13 +170,17 @@ renderHieAST dynFlags hieTypes ast = do
           tr []
             [ th [] [ text . toText . occNameString $ nameOccName name ]
             , td [] $ intersperse (br [])
-              [ text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
+              [ b [] [ text "name" ]
+              , text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
               , text $ "name sort: " <> (showNameSort name)
               , text $ "uniq: " <> show (nameUnique name)
               , text $ "span: " <> showSrcSpan (nameSrcSpan name)
               ]
             , detailTd
             ]
+
+    contextInfo_ ci =
+      div [ className "context-info" ] [ text ci ]
 
     -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
     showNameSpace ns
