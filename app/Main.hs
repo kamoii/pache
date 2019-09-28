@@ -69,20 +69,18 @@ main' hiePath = do
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
   let header =
-        [ VLeaf "link" $ fromList [ ("rel", AText "stylesheet"), ("href", AText "https://yarn.pm/normalize.css") ]
+        [ VLeaf "link" $ fromList [ ("rel", AText "stylesheet"), ("href", AText "https://unpkg.com/purecss@1.0.1/build/pure-min.css") ]
         , VNode "style" (fromList [("type", AText "text/css")]) [ VRawText cssStyle ]
         ]
   let cnf' = mkDefaultConfig 8080 "hie-viewer"
   let cnf = cnf' { cfgHeader = header }
   run cnf \_ -> do
-    (dy', tree_) <- unsafeBlockingIO
-      $ atomically
-      $ treeView2 (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
+    (dy', update) <- unsafeBlockingIO $ atomically $ mkDynamic ast
     let dy = getSpan . nodeSpan <$> dy'
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
-        [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ tree_ ]
+        [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ leftPain_ dynFlags update hieFile ]
         , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView (decodeUtf8 (hie_hs_src hieFile)) dy ]
         ]
       ]
@@ -95,14 +93,30 @@ main' hiePath = do
         , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
         ]
 
-    toTree :: HieAST i -> Tree (HieAST i)
-    toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
-
 getSpan :: RealSrcSpan -> _
 getSpan s =
   ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
   , (srcSpanEndLine s - 1, srcSpanEndCol s - 1)
   )
+
+-- Info / Avails / AST
+-- Assumes there is only one AST.
+leftPain_ dynFlags spanUpdate hieFile = do
+  let asts = hie_asts hieFile
+  let [ast] = M.elems $ getAsts asts
+  orr
+    [ div [ className "pure-menu pure-menu-horizontal" ]
+      [ ul [ className "pure-menu-list" ]
+        [ li [ className "pure-menu-item" ] [ text "Info" ]
+        , li [ className "pure-menu-item" ] [ text "Exports" ]
+        , li [ className "pure-menu-item pure-menu-selected" ] [ text "AST" ]
+        ]
+      ]
+    , treeView2 spanUpdate (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
+    ]
+  where
+    toTree :: HieAST i -> Tree (HieAST i)
+    toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
 
 -- css
 cssStyle :: Text
@@ -150,7 +164,7 @@ renderHieAST dynFlags hieTypes ast = do
 
     renderIdentTr (ident, detail) = do
       let detailTd = td []
-            [ b [] [ text "detail" ]
+            [ b [] [ text "detail(contextual)" ]
             , br []
             , text "context info:"
             , br []
@@ -170,7 +184,7 @@ renderHieAST dynFlags hieTypes ast = do
           tr []
             [ th [] [ text . toText . occNameString $ nameOccName name ]
             , td [] $ intersperse (br [])
-              [ b [] [ text "name" ]
+              [ b [] [ text "name(universal)" ]
               , text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
               , text $ "name sort: " <> (showNameSort name)
               , text $ "uniq: " <> show (nameUnique name)
@@ -274,14 +288,16 @@ sourceView src dyHlSpan = do
 tree view状態をどのように表現するかが肝。
 基本的に開閉状態かな？
 Tree (Bool, a) にするか
+
+  (dy, update) <- mkDynamic (tree ^. root)
+
 -}
 treeView2
-  :: (forall v. a -> Widget HTML v)
+  :: _
+  -> (forall v. a -> Widget HTML v)
   -> Tree a
-  -> STM (Dynamic a, Widget HTML v)
-treeView2 renderer tree = do
-  (dy, update) <- mkDynamic (tree ^. root)
-  pure (dy, go ((False,) <$> tree) update)
+  -> Widget HTML v
+treeView2 update renderer tree = go ((False,) <$> tree) update
   where
     go root update =
       loopM_ root \root -> renderNode root update
