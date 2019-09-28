@@ -30,7 +30,7 @@ library
 
 executable pache
   main-is:             Main.hs
-  other-modules:       Data.TreeZipper
+  -- other-modules:       Data.TreeZipper
   -- other-extensions:
   build-depends:       base ^>=4.13.0.0
                      , relude

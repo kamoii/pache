@@ -31,7 +31,6 @@ import qualified Data.Tree as Tr
 import Concur.Core
 import Concur.Replica
 import Concur.Replica.Run (run, mkDefaultConfig)
-import qualified Data.TreeZipper as TZ
 import Control.Concurrent.STM (retry)
 import Control.Concurrent.STM.TChan
 import qualified Text.ParserCombinators.ReadP as RP
@@ -70,7 +69,7 @@ main' hiePath = do
   print $ M.keys $ getAsts asts
   let header =
         [ VLeaf "link" $ fromList [ ("rel", AText "stylesheet"), ("href", AText "https://unpkg.com/purecss@1.0.1/build/pure-min.css") ]
-        , VNode "style" (fromList [("type", AText "text/css")]) [ VRawText cssStyle ]
+        , VNode "style" (fromList [("type", AText "text/css")]) [ VRawText (renderCSS cssStyle) ]
         ]
   let cnf' = mkDefaultConfig 8080 "hie-viewer"
   let cnf = cnf' { cfgHeader = header }
@@ -80,7 +79,7 @@ main' hiePath = do
     main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
-        [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ leftPain_ dynFlags update hieFile ]
+        [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ leftPain_ dynFlags update hieFileResult hieFile ]
         , div [ style [ ("grid-column", "2"), ("overflow", "scroll") ] ] [ sourceView (decodeUtf8 (hie_hs_src hieFile)) dy ]
         ]
       ]
@@ -101,29 +100,66 @@ getSpan s =
 
 -- Info / Avails / AST
 -- Assumes there is only one AST.
-leftPain_ dynFlags spanUpdate hieFile = do
+
+leftPainStyle = do
+  ".left-pain" ? do
+    "padding" .= "0.5em"
+
+data LeftPain
+  = LPInfo
+  | LPExports
+  | LPAst
+  deriving Eq
+
+leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
   let asts = hie_asts hieFile
   let [ast] = M.elems $ getAsts asts
-  orr
-    [ div [ className "pure-menu pure-menu-horizontal" ]
-      [ ul [ className "pure-menu-list" ]
-        [ li [ className "pure-menu-item" ] [ pureMenuLink_ "Info" ]
-        , li [ className "pure-menu-item" ] [ pureMenuLink_ "Exports" ]
-        , li [ className "pure-menu-item pure-menu-selected" ] [ pureMenuLink_ "AST" ]
+  loopM_ LPExports \t -> do
+    div [ className "left-pain" ]
+      [ div [ className "pure-menu pure-menu-horizontal" ]
+        [ ul [ className "pure-menu-list" ]
+          [ pureMenuItem_ t LPInfo "Info"
+          , pureMenuItem_ t LPExports "Exports"
+          , pureMenuItem_ t LPAst "AST"
+          ]
         ]
+      , hr []
+      , case t of
+          LPInfo    -> info_ hieFileResult hieFile
+          LPExports -> exports_ hieFile
+          LPAst     -> treeView spanUpdate (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
       ]
-    , treeView2 spanUpdate (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
-    ]
   where
-    pureMenuLink_ = a [ href "#", className "pure-menu-link" ] . one . text
+    pureMenuItem_ cur c =
+      li [ className ("pure-menu-item" <> bool "" " pure-menu-selected" (cur == c)) ]
+      . one
+      . pureMenuLink_ c
+    pureMenuLink_ c =
+      a [ c <$ onClick, href "#", className "pure-menu-link" ] . one . text
 
     toTree :: HieAST i -> Tree (HieAST i)
     toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
 
+--
+info_ hieFileResult hieFile = do
+  let Package{..} = modulePackage (hie_module hieFile)
+  orr
+    [ dltd_ "Result Version" $ text $ show $ hie_file_result_version hieFileResult
+    , dltd_ "GHC Versoin" $ text $ decodeUtf8 $ hie_file_result_ghc_version hieFileResult
+    , dltd_ "Source File Path" $ text (toText (hie_hs_file hieFile))
+    , dltd_ "Module" $ text $ toText $ moduleNameString $ moduleName $ hie_module hieFile
+    , dltd_ "Package" $ text $ toText $ packageName <> "-" <> packageVersion
+    ]
+  where
+    dltd_ label cont_ =
+      dl [] [ dt [] [ text label ] , dd [] [ cont_ ] ]
+
+exports_ hieFile = do
+  empty
 
 -- css
-cssStyle :: Text
-cssStyle = renderCSS do
+cssStyle :: _
+cssStyle = do
   ".ident-table" ? do
     "border-collapse" .= "collapse"
     "border" .= "1px solid black"
@@ -134,6 +170,7 @@ cssStyle = renderCSS do
     "white-space" .= "nowrap"
     "overflow" .= "hidden"
     "text-overflow" .= "ellipsis"
+  leftPainStyle
 
 renderHieAST :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
 renderHieAST dynFlags hieTypes ast = do
@@ -295,12 +332,12 @@ Tree (Bool, a) にするか
   (dy, update) <- mkDynamic (tree ^. root)
 
 -}
-treeView2
+treeView
   :: _
   -> (forall v. a -> Widget HTML v)
   -> Tree a
   -> Widget HTML v
-treeView2 update renderer tree = go ((False,) <$> tree) update
+treeView update renderer tree = go ((False,) <$> tree) update
   where
     go root update =
       loopM_ root \root -> renderNode root update
@@ -324,41 +361,6 @@ treeView2 update renderer tree = go ((False,) <$> tree) update
     rootStyle_ = style [ ("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
     childrenStyle_ = style [ ("margin-left", "2em") ]
     hasChild node = not . null $ node ^. branches
-
-{-
-実装は簡単だし、効率も悪くないが、使いがって見やすさに問題がある。
-親に戻る時にスクロール位置が一番上に戻ってしまう...
-上の階層のdivを消さずに div を重ねるていくほうがいいのかな？
--}
-treeView
-  :: (forall v. a -> Bool -> Widget HTML v)
-  -> Tree a
-  -> STM (Dynamic a, Widget HTML v)
-treeView renderer root = do
-  let zp = TZ.zipper root
-  (dy, update) <- mkDynamic (TZ.current zp)
-  pure (dy, render update zp)
-  where
-    renderer' tz isSelected = do
-      let baseCss = [("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
-      let addiCss = if isSelected then selectedStyle else mempty
-      div [ style (baseCss <> addiCss), tz <$ onClick ]
-        [ renderer (TZ.current tz) isSelected
-        , whenJustA (TZ.downToFirstChild tz) $ \ctz -> button [ ctz <$ onClick ] [ text "cildren" ]
-        ]
-      where
-        selectedStyle = [( "background-color", "yellow")]
-
-    render update zp = do
-      let before = reverse $ unfoldr (dupe <<$>> TZ.siblingBefore) zp
-      let after  = unfoldr (dupe <<$>> TZ.siblingAfter) zp
-      let all    = zip before (repeat False) <> [(zp, True)] <> zip after (repeat False)
-      zp' <- div []
-        [ whenJustA (TZ.up zp) $ \ctz -> button [ ctz <$ onClick ] [ text "parent" ]
-        , div [] (map (uncurry renderer') all)
-        ]
-      unsafeBlockingIO $ atomically $ update (TZ.current zp')
-      render update zp'
 
 -- https://gitlab.haskell.org/ghc/ghc/wikis/hie-files#reading-hie-files
 makeNc :: IO NameCache
