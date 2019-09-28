@@ -13,6 +13,7 @@ import Relude.Extra.Tuple (dupe)
 import HieBin
 import HieTypes
 import HieUtils
+import Avail
 import FastString (unpackFS)
 import Name (nameSrcSpan, nameUnique, nameOccName, dataName, tcClsName, tvName, varName)
 import qualified Name as Name
@@ -92,6 +93,21 @@ main' hiePath = do
         , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
         ]
 
+-- css
+cssStyle :: _
+cssStyle = do
+  ".ident-table" ? do
+    "border-collapse" .= "collapse"
+    "border" .= "1px solid black"
+    "td" ? "border" .= "1px solid black"
+    "th" ? "border" .= "1px solid black"
+  ".context-info" ? do
+    "width" .= "12em"
+    "white-space" .= "nowrap"
+    "overflow" .= "hidden"
+    "text-overflow" .= "ellipsis"
+  leftPainStyle
+
 getSpan :: RealSrcSpan -> _
 getSpan s =
   ( (srcSpanStartLine s - 1, srcSpanStartCol s - 1)
@@ -143,34 +159,49 @@ leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
 --
 info_ hieFileResult hieFile = do
   let Package{..} = modulePackage (hie_module hieFile)
-  orr
-    [ dltd_ "Result Version" $ text $ show $ hie_file_result_version hieFileResult
-    , dltd_ "GHC Versoin" $ text $ decodeUtf8 $ hie_file_result_ghc_version hieFileResult
-    , dltd_ "Source File Path" $ text (toText (hie_hs_file hieFile))
-    , dltd_ "Module" $ text $ toText $ moduleNameString $ moduleName $ hie_module hieFile
-    , dltd_ "Package" $ text $ toText $ packageName <> "-" <> packageVersion
+  dl []
+    [ dt_ "Result Version" ,   dd_ $ show $ hie_file_result_version hieFileResult
+    , dt_ "GHC Version" ,      dd_ $ decodeUtf8 $ hie_file_result_ghc_version hieFileResult
+    , dt_ "Source File Path" , dd_ (toText (hie_hs_file hieFile))
+    , dt_ "Module" ,           dd_ $ toText $ moduleNameString $ moduleName $ hie_module hieFile
+    , dt_ "Package" ,          dd_ $ toText $ packageName <> "-" <> packageVersion
     ]
   where
-    dltd_ label cont_ =
-      dl [] [ dt [] [ text label ] , dd [] [ cont_ ] ]
+    dt_ = dt [] . one . text
+    dd_ = dd [] . one . text
 
 exports_ hieFile = do
-  empty
+  let curMod  = hie_module hieFile
+  let exports = hie_exports hieFile
+  orr
+    [ h4 [] [ text $ "Export num: " <> show (length exports) ]
+    , ul [] $ map (li [] . one. export_ curMod) exports
+    ]
+  where
+    export_ curMod (Avail name) = do
+      -- Name sort must be `external` so there shoud be a module.
+      let Just mod = Name.nameModule_maybe name
+      orr
+        [ h5 [] [ text . toText . occNameString $ nameOccName name ]
+        , dl []
+          [ dt_ "Name Space"
+          , dd_ $ (showNameSpace $ occNameSpace $ nameOccName name)
+          , dt_ "Name Sort"
+          , dd_ $ (showNameSort name)
+          , dt_ "Definition"
+          , dd_ $ if curMod == mod
+                     then showSrcSpan (nameSrcSpan name)
+                     else toText $ moduleNameString $ moduleName mod
+          -- , dt_ "uniq", dd_ $ show (nameUnique name)
+          -- , dt_ "span", dd_ $ showSrcSpan (nameSrcSpan name)
+          ]
+        ]
 
--- css
-cssStyle :: _
-cssStyle = do
-  ".ident-table" ? do
-    "border-collapse" .= "collapse"
-    "border" .= "1px solid black"
-    "td" ? "border" .= "1px solid black"
-    "th" ? "border" .= "1px solid black"
-  ".context-info" ? do
-    "width" .= "12em"
-    "white-space" .= "nowrap"
-    "overflow" .= "hidden"
-    "text-overflow" .= "ellipsis"
-  leftPainStyle
+    export_ curMod (AvailTC name _ _) =
+      text . toText . occNameString $ nameOccName name
+
+    dt_ = dt [] . one . text
+    dd_ = dd [] . one . text
 
 renderHieAST :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
 renderHieAST dynFlags hieTypes ast = do
@@ -236,24 +267,24 @@ renderHieAST dynFlags hieTypes ast = do
     contextInfo_ ci =
       div [ className "context-info" ] [ text ci ]
 
-    -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
-    showNameSpace ns
-      | ns == dataName  = "data constructor"
-      | ns == tcClsName = "type constructor or class"
-      | ns == tvName    = "type variable"
-      | ns == varName   = "variable"
-      | otherwise      = error "New NameSpace was added?"
+-- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
+showNameSpace ns
+  | ns == dataName  = "Data Constructor"
+  | ns == tcClsName = "Type Constructor or Class"
+  | ns == tvName    = "Type Variable"
+  | ns == varName   = "Variable"
+  | otherwise      = error "New NameSpace was added?"
 
-    showNameSort name
-      | Name.isBuiltInSyntax name = "built-in-syntax"
-      | Name.isWiredInName name   = "wired-in"
-      | Name.isSystemName name    = "system"
-      | Name.isExternalName name  = "external"
-      | Name.isInternalName name  = "internal"
-      | otherwise                 = error "Unexpected name sort"
+showNameSort name
+  | Name.isBuiltInSyntax name = "Built-in-Syntax"
+  | Name.isWiredInName name   = "Wired-in"
+  | Name.isSystemName name    = "System"
+  | Name.isExternalName name  = "External"
+  | Name.isInternalName name  = "Internal"
+  | otherwise                 = error "Unexpected name sort"
 
-    showSrcSpan (RealSrcSpan s) = show $ getSpan s
-    showSrcSpan (UnhelpfulSpan s) = toText $ unpackFS s
+showSrcSpan (RealSrcSpan s) = show $ getSpan s
+showSrcSpan (UnhelpfulSpan s) = toText $ unpackFS s
 
 
 -- | Extract package information from `Module` type
