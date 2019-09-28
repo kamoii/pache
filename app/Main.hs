@@ -107,16 +107,19 @@ leftPain_ dynFlags spanUpdate hieFile = do
   orr
     [ div [ className "pure-menu pure-menu-horizontal" ]
       [ ul [ className "pure-menu-list" ]
-        [ li [ className "pure-menu-item" ] [ text "Info" ]
-        , li [ className "pure-menu-item" ] [ text "Exports" ]
-        , li [ className "pure-menu-item pure-menu-selected" ] [ text "AST" ]
+        [ li [ className "pure-menu-item" ] [ pureMenuLink_ "Info" ]
+        , li [ className "pure-menu-item" ] [ pureMenuLink_ "Exports" ]
+        , li [ className "pure-menu-item pure-menu-selected" ] [ pureMenuLink_ "AST" ]
         ]
       ]
     , treeView2 spanUpdate (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
     ]
   where
+    pureMenuLink_ = a [ href "#", className "pure-menu-link" ] . one . text
+
     toTree :: HieAST i -> Tree (HieAST i)
     toTree ast = Data.Tree.Node ast (map toTree (nodeChildren ast))
+
 
 -- css
 cssStyle :: Text
