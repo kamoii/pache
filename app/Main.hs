@@ -93,9 +93,18 @@ main' hiePath = do
         , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
         ]
 
+baseStyle :: _
+baseStyle = do
+  "html" ? do
+    "font-family" .= "monospace"
+    -- https://palx.jxnblk.com/07c
+    "color" .= "#374047"
+    "background-color" .= "#ebedee"
+
 -- css
 cssStyle :: _
 cssStyle = do
+  baseStyle
   ".ident-table" ? do
     "border-collapse" .= "collapse"
     "border" .= "1px solid black"
@@ -353,7 +362,7 @@ sourceView src dyHlSpan = do
             (b, c) = T.splitAt (endCol - startCol) b'
         in [ text a, hl_ b, text c ]
       where
-        hl_ txt = span [ style [ ("background-color", "yellow") ] ] [ text txt ]
+        hl_ txt = span [ style [ ("background-color", "#e0d668") ] ] [ text txt ]
 
 {-
 tree view状態をどのように表現するかが肝。
