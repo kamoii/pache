@@ -57,7 +57,8 @@ main = do
   main' hiePath
 
 up = rapid 0 \r -> do
-  restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
+  -- restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
+  restart r "server" $ main' "/home/sino/workspace/hies/Network/ByteOrder.hie"
 
 main' hiePath = do
   dynFlags <- dynFlagsForPrinting
@@ -223,6 +224,7 @@ exports_ hieFile = do
 hieAstStyle = "table.hie-ast" ? do
   "th" ? do
     "text-align" .= "left"
+    "vertical-align" .= "top"
   "td" ? do
     "padding-left" .= "0.4em"
 
