@@ -5,6 +5,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Prelude()
@@ -30,7 +31,7 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Tree as Tr
 import Concur.Core
-import Concur.Replica
+import Concur.Replica as CR
 import Concur.Replica.Run (run, mkDefaultConfig)
 import Control.Concurrent.STM (retry)
 import Control.Concurrent.STM.TChan
@@ -39,6 +40,7 @@ import Stitch
 import Optics
 import Data.Tree.Optics
 import Rapid
+import Data.FileEmbed (embedFile)
 
 import SysTools ( initSysTools )
 import DynFlags ( DynFlags, defaultDynFlags )
@@ -68,9 +70,13 @@ main' hiePath = do
   let [ast] = M.elems $ getAsts asts
   putStrLn $ "hieFile read!! from: " <> filePath
   print $ M.keys $ getAsts asts
+  -- for development
+  js <- readFileText "util.js"
   let header =
         [ VLeaf "link" $ fromList [ ("rel", AText "stylesheet"), ("href", AText "https://unpkg.com/purecss@1.0.1/build/pure-min.css") ]
         , VNode "style" (fromList [("type", AText "text/css")]) [ VRawText (renderCSS cssStyle) ]
+        -- , VNode "script" mempty [ VRawText (decodeUtf8 $(embedFile "util.js")) ]
+        , VNode "script" mempty [ VRawText js ]
         ]
   let cnf' = mkDefaultConfig 8080 "hie-viewer"
   let cnf = cnf' { cfgHeader = header }
@@ -115,7 +121,9 @@ cssStyle = do
     "white-space" .= "nowrap"
     "overflow" .= "hidden"
     "text-overflow" .= "ellipsis"
+  hieAstStyle
   leftPainStyle
+  treeViewStyle
 
 getSpan :: RealSrcSpan -> _
 getSpan s =
@@ -139,7 +147,7 @@ data LeftPain
 leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
   let asts = hie_asts hieFile
   let [ast] = M.elems $ getAsts asts
-  loopM_ LPExports \t -> do
+  loopM_ LPAst \t -> do
     div [ className "left-pain" ]
       [ div [ className "pure-menu pure-menu-horizontal" ]
         [ ul [ className "pure-menu-list" ]
@@ -152,7 +160,7 @@ leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
       , case t of
           LPInfo    -> info_ hieFileResult hieFile
           LPExports -> exports_ hieFile
-          LPAst     -> treeView spanUpdate (renderHieAST dynFlags (hie_types hieFile)) (toTree ast)
+          LPAst     -> treeView spanUpdate (hieAST_ dynFlags (hie_types hieFile)) (toTree ast)
       ]
   where
     pureMenuItem_ cur c =
@@ -212,13 +220,19 @@ exports_ hieFile = do
     dt_ = dt [] . one . text
     dd_ = dd [] . one . text
 
-renderHieAST :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
-renderHieAST dynFlags hieTypes ast = do
+hieAstStyle = "table.hie-ast" ? do
+  "th" ? do
+    "text-align" .= "left"
+  "td" ? do
+    "padding-left" .= "0.4em"
+
+hieAST_ :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
+hieAST_ dynFlags hieTypes ast = do
   let ni = nodeInfo ast
-  table []
-    [ tr [] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
-    , tr [] [ th [] [ text "types"  ], td [] [ renderTypes (nodeType ni) ] ]
-    , tr [] [ th [] [ text "idents" ], td [] [ renderIdents (nodeIdentifiers ni) ] ]
+  table [ className "hie-ast" ]
+    [ tr [ className "hie-ast-annots" ] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
+    , tr [ className "hie-ast-types" ]  [ th [] [ text "types"  ], td [] [ renderTypes (nodeType ni) ] ]
+    , tr [ className "hie-ast-idents" ] [ th [] [ text "idents" ], td [] [ renderIdents (nodeIdentifiers ni) ] ]
     ]
   where
     showAnnots annots =
@@ -334,20 +348,35 @@ parsePackage =
     <*> do RP.char '-' *> RP.munch1 (C.isNumber ||^ (=='.'))
     <*> do RP.char '-' *> RP.count 64 (RP.satisfy C.isAlphaNum) <* RP.eof
 
+-- Handling scroll
+-- Current `cocure` (native) interface doesn't offer scroll set freature.
+-- Kinda hacky but uses util.js
 sourceView
   :: Text
   -> Dynamic ((Int,Int), (Int,Int))  -- 0-index
   -> Widget HTML v
 sourceView src dyHlSpan = do
   let lines = T.lines src
-  onDynamic dyHlSpan $ \sp -> container_ $ map (line_ sp) $ zip [0..] lines
+  onDynamic dyHlSpan $ \sp -> do
+    orr
+      [ container_ $ map (line_ sp) $ zip [0..] lines
+      , div
+        [ hidden True
+        , CR.id "source-view-current-line"
+        , textProp "data-current-line-id" (lineId (sp ^. _1 % _1))
+        ]
+        mempty
+      ]
   where
+    lineId i =
+      "source-view-line-" <> show i
+
     container_ =
       div [ style [ ("padding", "0.5em 0px") ] ]
 
     line_ sp (i, txt) =
       div
-        [ style [ ("white-space", "pre"), ("font-family", "monospace"), ("display", "grid"), ("grid-template-columns", "3em 1fr") ] ]
+        [ CR.id (lineId i), style [ ("white-space", "pre"), ("font-family", "monospace"), ("display", "grid"), ("grid-template-columns", "3em 1fr") ] ]
         [ div [ style [ ("grid-column", "1"), ("text-align", "right"), ("padding", "0px 0.5em") ] ] [ text $ show (i+1) ]
         , div [ style [ ("grid-column", "2") ] ] (lineBody_ sp (i,txt))
         ]
@@ -377,30 +406,66 @@ treeView
   -> (forall v. a -> Widget HTML v)
   -> Tree a
   -> Widget HTML v
-treeView update renderer tree = go ((False,) <$> tree) update
+treeView update renderer tree = go ((False,) <$> tree)
   where
-    go root update =
-      loopM_ root \root -> renderNode root update
+    go root =
+      loopM_ ([], root) \(currentId, root) -> do
+        r <- node_ currentId [] root
+        case r of
+          Right newRoot ->
+            pure (currentId, newRoot)
+          Left (selectId, a) -> do
+            unsafeBlockingIO $ atomically $ update a
+            pure (selectId, root)
 
-    renderNode node update = do
+    node_ currentId id node = do
       let (isOpen, a) = node ^. root
+      let isSelected = currentId == id
       div []
-        [ div [ rootStyle_ ]
-          [ renderer a
-          , whenA (hasChild node)
-            $ button [ (node & root % _1 %~ not) <$ onClick ] [ text "child toggle" ]
-          , forever
-            $ button [ onClick ] [ text "hightlight" ] *> (unsafeBlockingIO $ atomically $ update a)
+        [ div [ className "tree-view-node", CR.id ("tree-view-node-" <> show id) ]
+          [ div
+            [ className "tree-view-child-toggle" ]
+            [ childToggle_ (hasChild node) isOpen ]
+            $> Right (node & root % _1 %~ not)
+          , div
+            [ className ("tree-view-node-content" <> bool "" " tree-view-node-content-selected" isSelected), onClick ]
+            [ renderer a ]
+            $> Left (id, a)
           ]
         , whenA (isOpen && hasChild node)
           $ div [ childrenStyle_ ]
           $ flip map (zip [0..] (node ^. branches))
-          $ \(i, childNode) -> (\c -> set (branches % ix i) c node) <$> renderNode childNode update
+          $ \(i, childNode) -> (\c -> set (branches % ix i) c node) <<$>> node_ currentId (i:id) childNode
         ]
 
-    rootStyle_ = style [ ("border", "1px solid gray"), ("margin-bottom", "0.5rem") ]
+    childToggle_ hasChild isOpen
+      | not hasChild = button [ className "pure-button pure-button-disabled" ] [ ]
+      | isOpen = button [ onClick, className "pure-button pure-button-active" ] [ text "-" ]
+      | otherwise = button [ onClick, className "pure-button" ] [ text "+" ]
+
     childrenStyle_ = style [ ("margin-left", "2em") ]
     hasChild node = not . null $ node ^. branches
+
+treeViewStyle = do
+  ".tree-view-node" ? do
+    "border" .= "1px solid gray"
+    "margin-bottom" .= "0.5em"
+    "display" .= "grid"
+    "grid-template-columns" .= "1.2em 1fr"
+
+    ".tree-view-child-toggle" ? do
+      "grid-column" .= "1"
+      "button" ? do
+        "width" .= "100%"
+        "height" .= "100%"
+        "padding" .= "0"
+
+    ".tree-view-node-content" ? do
+      "grid-column" .= "2"
+      "padding" .= "0.5em"
+
+    ".tree-view-node-content-selected" ? do
+      "background-color" .= "#e0d668"
 
 -- https://gitlab.haskell.org/ghc/ghc/wikis/hie-files#reading-hie-files
 makeNc :: IO NameCache

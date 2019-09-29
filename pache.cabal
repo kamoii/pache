@@ -38,6 +38,7 @@ executable pache
                      , stm
                      , text
                      , bytestring
+                     , file-embed
                      , stitch
                      , ghc
                      , ghc-paths
