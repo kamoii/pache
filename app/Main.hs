@@ -95,9 +95,11 @@ main' hiePath = do
     header_ module' = do
       let Package{..} = modulePackage module'
       let modname = moduleNameString $ moduleName module'
-      h1 [ style [ ("grid-row", "1") ] ]
-        [ text (toText modname)
-        , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
+      div []
+        [ h1 [ style [ ("grid-row", "1") ] ]
+          [ text (toText modname)
+          , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
+          ]
         ]
 
 baseStyle :: _
@@ -221,12 +223,30 @@ exports_ hieFile = do
     dt_ = dt [] . one . text
     dd_ = dd [] . one . text
 
-hieAstStyle = "table.hie-ast" ? do
-  "th" ? do
-    "text-align" .= "left"
-    "vertical-align" .= "top"
-  "td" ? do
-    "padding-left" .= "0.4em"
+hieAstStyle = do
+  "table.hie-ast" ? do
+    "width" .= "100%"
+
+    "th" ? do
+      "width" .= "4em"
+      "text-align" .= "left"
+      "vertical-align" .= "top"
+
+    "td" ? do
+      "padding-left" .= "0.4em"
+
+    ".ident-module-name" ? do
+      "border" .= "2px dashed grey"
+
+    ".ident-name" ? do
+      "> h4" ? do
+        "display" .= "inline-block"
+        "min-width" .= "3em"
+        "text-align" .= "center"
+        "padding" .= "0.2em 0.5em"
+        "border" .= "0.15em dashed grey"
+        "margin-top" .= "0"
+        "margin-bottom" .= "4px"
 
 hieAST_ :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
 hieAST_ dynFlags hieTypes ast = do
@@ -256,7 +276,25 @@ hieAST_ dynFlags hieTypes ast = do
 
     renderIdents idents
       | M.null idents = text "[]"
-      | otherwise = table [] $ map renderIdentTr (M.toList idents)
+      | otherwise = div [] $ map (ident_ . fst) (M.toList idents)
+      -- | otherwise = table [] $ map renderIdentTr (M.toList idents)
+
+    ident_ ident =
+      case ident of
+        Left moduleName -> do
+          div [ className "ident-module-name" ]
+            [ text (toText $ moduleNameString moduleName <> " (module name)") ]
+        Right name -> do
+          div [ className "ident-name" ]
+            [ h4  [] [ text . toText . occNameString $ nameOccName name ]
+            , div [] $ intersperse (br [])
+              [ text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
+              , text $ "name sort: " <> (showNameSort name)
+              -- 場所取るだけ邪魔かな？
+              -- , text $ "uniq: " <> show (nameUnique name)
+              , text $ "span: " <> showSrcSpan (nameSrcSpan name)
+              ]
+            ]
 
     renderIdentTr (ident, detail) = do
       let detailTd = td []
@@ -431,7 +469,9 @@ treeView update renderer tree = go ((False,) <$> tree)
             $> Right (node & root % _1 %~ not)
           , div
             [ className ("tree-view-node-content" <> bool "" " tree-view-node-content-selected" isSelected), onClick ]
-            [ renderer a ]
+            [ renderer a
+            , div [ className "highlight" ] []
+            ]
             $> Left (id, a)
           ]
         , whenA (isOpen && hasChild node)
@@ -466,7 +506,18 @@ treeViewStyle = do
       "grid-column" .= "2"
       "padding" .= "0.5em"
 
-    ".tree-view-node-content-selected" ? do
+      "position" .= "relative"
+      "z-index" .= "1"
+
+    ".tree-view-node-content-selected > .highlight" ?  do
+      "display" .= "block"
+      "position" .= "absolute"
+      "z-index" .= "-1"
+      "top" .= "0"
+      "left" .= "0"
+      "height" .= "100%"
+      "width" .= "4.5em"
+      "content" .= ""
       "background-color" .= "#e0d668"
 
 -- https://gitlab.haskell.org/ghc/ghc/wikis/hie-files#reading-hie-files
