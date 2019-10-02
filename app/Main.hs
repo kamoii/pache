@@ -236,7 +236,14 @@ hieAstStyle = do
       "padding-left" .= "0.4em"
 
     ".ident-module-name" ? do
-      "border" .= "0.15em dashed grey"
+      "> h4" ? do
+        "display" .= "inline-block"
+        "min-width" .= "3em"
+        "text-align" .= "center"
+        "padding" .= "0.2em 0.5em"
+        "border" .= "0.15em dashed grey"
+        "margin-top" .= "0"
+        "margin-bottom" .= "4px"
 
     ".ident-name" ? do
       "> h4" ? do
@@ -282,7 +289,7 @@ hieAST_ dynFlags hieModule hieTypes ast = do
       case ident of
         Left moduleName -> do
           div [ className "ident-module-name" ]
-            [ text (toText $ moduleNameString moduleName <> " (module name)") ]
+            [ h4 [] [ text (toText $ moduleNameString moduleName <> " (module)") ] ]
         Right name -> do
           div [ className "ident-name" ]
             [ h4  [] [ text . toText . occNameString $ nameOccName name ]
