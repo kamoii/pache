@@ -84,7 +84,7 @@ main' hiePath = do
   run cnf \_ -> do
     (dy', update) <- unsafeBlockingIO $ atomically $ mkDynamic ast
     let dy = getSpan . nodeSpan <$> dy'
-    main_ [ style [ ("height", "95vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
+    main_ [ style [ ("height", "97vh"), ("display", "grid"), ("grid-template-rows", "auto 1fr") ] ]
       [ header_ module'
       , div [ style [ ("grid-row", "2"), ("overflow", "hidden"), ("display", "grid"), ("grid-template-columns", "40% 60%") ] ]
         [ div [ style [ ("grid-column", "1"), ("overflow", "scroll") ] ] [ leftPain_ dynFlags update hieFileResult hieFile ]
@@ -96,7 +96,7 @@ main' hiePath = do
       let Package{..} = modulePackage module'
       let modname = moduleNameString $ moduleName module'
       div []
-        [ h1 [ style [ ("grid-row", "1") ] ]
+        [ h2 [ style [ ("grid-row", "1") ] ]
           [ text (toText modname)
           , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
           ]
@@ -161,7 +161,7 @@ leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
       , case t of
           LPInfo    -> info_ hieFileResult hieFile
           LPExports -> exports_ hieFile
-          LPAst     -> treeView spanUpdate (hieAST_ dynFlags (hie_types hieFile)) (toTree ast)
+          LPAst     -> treeView spanUpdate (hieAST_ dynFlags (hie_module hieFile) (hie_types hieFile)) (toTree ast)
       ]
   where
     pureMenuItem_ cur c =
@@ -224,6 +224,8 @@ exports_ hieFile = do
 hieAstStyle = do
   "table.hie-ast" ? do
     "width" .= "100%"
+    "border-collapse" .= "separate"
+    "border-spacing" .= "0px 3px"
 
     "th" ? do
       "width" .= "4em"
@@ -234,7 +236,7 @@ hieAstStyle = do
       "padding-left" .= "0.4em"
 
     ".ident-module-name" ? do
-      "border" .= "2px dashed grey"
+      "border" .= "0.15em dashed grey"
 
     ".ident-name" ? do
       "> h4" ? do
@@ -246,8 +248,8 @@ hieAstStyle = do
         "margin-top" .= "0"
         "margin-bottom" .= "4px"
 
-hieAST_ :: _ -> _ -> HieAST TypeIndex -> Widget HTML v
-hieAST_ dynFlags hieTypes ast = do
+hieAST_ :: _ -> _ -> _ -> HieAST TypeIndex -> Widget HTML v
+hieAST_ dynFlags hieModule hieTypes ast = do
   let ni = nodeInfo ast
   table [ className "hie-ast" ]
     [ tr [ className "hie-ast-annots" ] [ th [] [ text "annots" ], td [] [ text (toText . showAnnots . nodeAnnotations $ ni) ] ]
@@ -270,7 +272,7 @@ hieAST_ dynFlags hieTypes ast = do
          else orr $ intersperse (br []) $ map (text . toText . showType) types
 
     showType typeIndex =
-      renderHieType dynFlags $ recoverFullType typeIndex hieTypes
+      ":: " <> (renderHieType dynFlags $ recoverFullType typeIndex hieTypes)
 
     renderIdents idents
       | M.null idents = text "[]"
@@ -289,9 +291,34 @@ hieAST_ dynFlags hieTypes ast = do
               , text $ "name sort: " <> (showNameSort name)
               -- 場所取るだけ邪魔かな？
               -- , text $ "uniq: " <> show (nameUnique name)
-              , text $ "span: " <> showSrcSpan (nameSrcSpan name)
+              , text "defined at: " <|> definedAt
               ]
             ]
+          where
+            definedAt = case (Name.nameModule_maybe name, nameSrcSpan name) of
+              (Just mod, RealSrcSpan rss)
+                | mod == hieModule        -> text $ "in-module" <> showSrcSpanRelative (nodeSpan ast) rss
+                | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(*)"
+              (Just mod, UnhelpfulSpan message)
+                | mod == hieModule        -> error "???"
+                | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(-)"
+              (Nothing, RealSrcSpan rss)
+                | Name.isSystemName name -> error "???"
+                | otherwise              -> text $ "in-module" <> showSrcSpanRelative (nodeSpan ast) rss
+              (Nothing, UnhelpfulSpan message)
+                | Name.isSystemName name -> text . toText $ "system(" <> unpackFS message <> ")"
+                | otherwise              -> error "???"
+
+    showSrcSpanRelative baseSpan targetSpan
+      | baseSpan == targetSpan = "(=)"
+      | SrcLoc.containsSpan baseSpan targetSpan = "(>" <> showSrcSpan targetSpan <> "<)"
+      | otherwise = "(<" <> showSrcSpan targetSpan <> ">)"
+
+    showSrcSpan span =
+      let ((sl,sc), (el,ec)) = getSpan span
+      in if sl == el
+         then "line:" <> show (sl+1) <> ", col:" <> show (sc+1) <> "-" <> show ec
+         else "line:" <> show (sl+1) <> " col:" <> show (sc+1) <> ", line:" <> show (el+1) <> " col:" <> show ec
 
     detail_ detail = do
       let infos = S.toList $ identInfo detail
