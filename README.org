@@ -1,5 +1,8 @@
-Needs cabal-install 3.0.0.0
-分からんが 2.4.0.1 だと Cabal 2.4.0.1 をビルドしようとして失敗する
 
+* hie-viewer
 
-: $ cabal new-build exe:pache --allow-newer
+Requires GHC 8.8.1 and cabal >= 3.0.0.
+
+#+begin_src eg
+cabal new-run exe:hie-viewer --allow-newer -- /path/to/hie_file.hie
+#+end_src
