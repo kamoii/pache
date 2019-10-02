@@ -119,11 +119,6 @@ cssStyle = do
     "border" .= "1px solid black"
     "td" ? "border" .= "1px solid black"
     "th" ? "border" .= "1px solid black"
-  ".context-info" ? do
-    "width" .= "12em"
-    "white-space" .= "nowrap"
-    "overflow" .= "hidden"
-    "text-overflow" .= "ellipsis"
   hieAstStyle
   leftPainStyle
   treeViewStyle
@@ -276,8 +271,7 @@ hieAST_ dynFlags hieTypes ast = do
 
     renderIdents idents
       | M.null idents = text "[]"
-      | otherwise = div [] $ map (ident_ . fst) (M.toList idents)
-      -- | otherwise = table [] $ map renderIdentTr (M.toList idents)
+      | otherwise = div [] $ map (\(ident, detail) -> ident_ ident <|> detail_ detail) (M.toList idents)
 
     ident_ ident =
       case ident of
@@ -296,39 +290,25 @@ hieAST_ dynFlags hieTypes ast = do
               ]
             ]
 
-    renderIdentTr (ident, detail) = do
-      let detailTd = td []
-            [ b [] [ text "detail(contextual)" ]
-            , br []
-            , text "context info:"
-            , br []
-            , orr $ (map (contextInfo_ . show) $ S.toList $ identInfo detail)
-            , br []
-            , text "type:"
-            , br []
-            , text $ maybe "--" (toText . showType) (identType detail)
-            ]
-      case ident of
-        Left moduleName ->
-          tr []
-            [ th [colspan "2"] [ text (toText $ moduleNameString moduleName <> "(module name)") ]
-            , detailTd
-            ]
-        Right name -> do
-          tr []
-            [ th [] [ text . toText . occNameString $ nameOccName name ]
-            , td [] $ intersperse (br [])
-              [ b [] [ text "name(universal)" ]
-              , text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
-              , text $ "name sort: " <> (showNameSort name)
-              , text $ "uniq: " <> show (nameUnique name)
-              , text $ "span: " <> showSrcSpan (nameSrcSpan name)
-              ]
-            , detailTd
-            ]
+    detail_ detail = do
+      let infos = S.toList $ identInfo detail
+      div [ className "ident-detail" ]
+        [ text "context info: "
+        , if null infos
+          then text "--"
+          else orr $ intersperse (text ", ") $ map info_ infos
+        , br []
+        , text "context type: "
+        , text $ maybe "--" (toText . showType) (identType detail)
+        ]
+      where
+        info_ info = do
+          let s = show info
+          let (h, r) = T.breakOn " " s
+          if T.null r
+             then span [] [ text h ]
+             else span [ title s ] [ text $ h <> ".." ]
 
-    contextInfo_ ci =
-      div [ className "context-info" ] [ text ci ]
 
 -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
 showNameSpace ns
