@@ -119,6 +119,9 @@ cssStyle = do
     "border" .= "1px solid black"
     "td" ? "border" .= "1px solid black"
     "th" ? "border" .= "1px solid black"
+  "main" ? do
+    "padding" .= "0 1em"
+
   hieAstStyle
   leftPainStyle
   treeViewStyle
@@ -134,7 +137,7 @@ getSpan s =
 
 leftPainStyle = do
   ".left-pain" ? do
-    "padding" .= "0.5em"
+    "padding-right" .= "0.5em"
 
 data LeftPain
   = LPInfo
