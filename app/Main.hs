@@ -122,6 +122,7 @@ cssStyle = do
   "main" ? do
     "padding" .= "0 1em"
 
+  exportStyle
   hieAstStyle
   leftPainStyle
   treeViewStyle
@@ -154,7 +155,7 @@ leftPain_ dynFlags spanUpdate hieFileResult hieFile = do
       [ div [ className "pure-menu pure-menu-horizontal" ]
         [ ul [ className "pure-menu-list" ]
           [ pureMenuItem_ t LPInfo "Info"
-          , pureMenuItem_ t LPExports "Exports"
+          , pureMenuItem_ t LPExports $ "Exports(" <> show (length $ hie_exports hieFile) <> ")"
           , pureMenuItem_ t LPAst "AST"
           ]
         ]
@@ -189,30 +190,31 @@ info_ hieFileResult hieFile = do
     dt_ = dt [] . one . text
     dd_ = dd [] . one . text
 
+exportStyle = do
+  ".export-name" ? do
+    "> h4" ? do
+      "display" .= "inline-block"
+      "min-width" .= "3em"
+      "text-align" .= "center"
+      "padding" .= "0.2em 0.5em"
+      "border" .= "0.15em dashed grey"
+      "margin-top" .= "0"
+      "margin-bottom" .= "4px"
+
 exports_ hieFile = do
   let curMod  = hie_module hieFile
   let exports = hie_exports hieFile
-  orr
-    [ h4 [] [ text $ "Export num: " <> show (length exports) ]
-    , ul [] $ map (li [] . one. export_ curMod) exports
-    ]
+  ul [] $ map (li [] . one. export_ curMod) exports
   where
     export_ curMod (Avail name) = do
       -- Name sort must be `external` so there shoud be a module.
       let Just mod = Name.nameModule_maybe name
-      orr
-        [ h5 [] [ text . toText . occNameString $ nameOccName name ]
-        , dl []
-          [ dt_ "Name Space"
-          , dd_ $ (showNameSpace $ occNameSpace $ nameOccName name)
-          , dt_ "Name Sort"
-          , dd_ $ (showNameSort name)
-          , dt_ "Definition"
-          , dd_ $ if curMod == mod
-                     then showSrcSpan (nameSrcSpan name)
-                     else toText $ moduleNameString $ moduleName mod
-          -- , dt_ "uniq", dd_ $ show (nameUnique name)
-          -- , dt_ "span", dd_ $ showSrcSpan (nameSrcSpan name)
+      div [ className "export-name" ]
+        [ h4  [] [ text . toText . occNameString $ nameOccName name ]
+        , div [] $ intersperse (br [])
+          [ text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
+          , text $ "name sort: " <> (showNameSort name)
+          , text   "defined at: " <|> definedAt curMod Nothing name
           ]
         ]
 
@@ -297,36 +299,9 @@ hieAST_ dynFlags hieModule hieTypes ast = do
             , div [] $ intersperse (br [])
               [ text $ "name space: " <> (showNameSpace $ occNameSpace $ nameOccName name)
               , text $ "name sort: " <> (showNameSort name)
-              -- 場所取るだけ邪魔かな？
-              -- , text $ "uniq: " <> show (nameUnique name)
-              , text "defined at: " <|> definedAt
+              , text   "defined at: " <|> definedAt hieModule (Just ast) name
               ]
             ]
-          where
-            definedAt = case (Name.nameModule_maybe name, nameSrcSpan name) of
-              (Just mod, RealSrcSpan rss)
-                | mod == hieModule        -> text $ "in-module" <> showSrcSpanRelative (nodeSpan ast) rss
-                | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(*)"
-              (Just mod, UnhelpfulSpan message)
-                | mod == hieModule        -> error "???"
-                | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(-)"
-              (Nothing, RealSrcSpan rss)
-                | Name.isSystemName name -> error "???"
-                | otherwise              -> text $ "in-module" <> showSrcSpanRelative (nodeSpan ast) rss
-              (Nothing, UnhelpfulSpan message)
-                | Name.isSystemName name -> text . toText $ "system(" <> unpackFS message <> ")"
-                | otherwise              -> error "???"
-
-    showSrcSpanRelative baseSpan targetSpan
-      | baseSpan == targetSpan = "(=)"
-      | SrcLoc.containsSpan baseSpan targetSpan = "(>" <> showSrcSpan targetSpan <> "<)"
-      | otherwise = "(<" <> showSrcSpan targetSpan <> ">)"
-
-    showSrcSpan span =
-      let ((sl,sc), (el,ec)) = getSpan span
-      in if sl == el
-         then "line:" <> show (sl+1) <> ", col:" <> show (sc+1) <> "-" <> show ec
-         else "line:" <> show (sl+1) <> " col:" <> show (sc+1) <> ", line:" <> show (el+1) <> " col:" <> show ec
 
     detail_ detail = do
       let infos = S.toList $ identInfo detail
@@ -347,6 +322,34 @@ hieAST_ dynFlags hieModule hieTypes ast = do
              then span [] [ text h ]
              else span [ title s ] [ text $ h <> ".." ]
 
+definedAt :: Module -> Maybe (HieAST a) -> Name.Name -> Widget HTML v
+definedAt currentModule astMaybe name =
+  case (Name.nameModule_maybe name, nameSrcSpan name) of
+    (Just mod, RealSrcSpan rss)
+      | mod == currentModule    -> text $ "in-module" <> maybe ("(" <> showSrcSpan rss <> ")") (\ast -> showSrcSpanRelative (nodeSpan ast) rss) astMaybe
+      | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(*)"
+    (Just mod, UnhelpfulSpan message)
+      | mod == currentModule    -> error "???"
+      | otherwise              -> text . toText $ moduleNameString (moduleName mod) <> "(-)"
+    (Nothing, RealSrcSpan rss)
+      | Name.isSystemName name -> error "???"
+      | otherwise              -> text $ "in-module" <> maybe ("(" <> showSrcSpan rss <> ")") (\ast -> showSrcSpanRelative (nodeSpan ast) rss) astMaybe
+    (Nothing, UnhelpfulSpan message)
+      | Name.isSystemName name -> text . toText $ "system(" <> unpackFS message <> ")"
+      | otherwise              -> error "???"
+
+showSrcSpanRelative :: RealSrcSpan -> RealSrcSpan -> Text
+showSrcSpanRelative baseSpan targetSpan
+  | baseSpan == targetSpan = "(=)"
+  | SrcLoc.containsSpan baseSpan targetSpan = "(>" <> showSrcSpan targetSpan <> "<)"
+  | otherwise = "(<" <> showSrcSpan targetSpan <> ">)"
+
+showSrcSpan :: RealSrcSpan -> Text
+showSrcSpan span =
+  let ((sl,sc), (el,ec)) = getSpan span
+  in if sl == el
+     then "line:" <> show (sl+1) <> ", col:" <> show (sc+1) <> "-" <> show ec
+     else "line:" <> show (sl+1) <> " col:" <> show (sc+1) <> ", line:" <> show (el+1) <> " col:" <> show ec
 
 -- NameSpace doesn't have `Show` instance. It doesn't export constructors too.
 showNameSpace ns
@@ -363,9 +366,6 @@ showNameSort name
   | Name.isExternalName name  = "External"
   | Name.isInternalName name  = "Internal"
   | otherwise                 = error "Unexpected name sort"
-
-showSrcSpan (RealSrcSpan s) = show $ getSpan s
-showSrcSpan (UnhelpfulSpan s) = toText $ unpackFS s
 
 
 -- | Extract package information from `Module` type
