@@ -58,7 +58,7 @@ main = do
 
 up = rapid 0 \r -> do
   -- restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
-  restart r "server" $ main' "/home/sino/workspace/hies/Network/ByteOrder.hie"
+  restart r "server" $ main' "/home/sino/workspace/hies/UtilsCodegen.hie"
 
 main' hiePath = do
   dynFlags <- dynFlagsForPrinting
@@ -98,7 +98,7 @@ main' hiePath = do
       div []
         [ h2 [ style [ ("grid-row", "1") ] ]
           [ text (toText modname)
-          , text . toText $ "(" <> packageName <> "-" <> packageVersion <> ")"
+          , text . toText $ "(" <> packageName <> fromMaybe "" (("-" <>) <$> packageVersion) <> ")"
           ]
         ]
 
@@ -182,7 +182,7 @@ info_ hieFileResult hieFile = do
     , dt_ "GHC Version" ,      dd_ $ decodeUtf8 $ hie_file_result_ghc_version hieFileResult
     , dt_ "Source File Path" , dd_ (toText (hie_hs_file hieFile))
     , dt_ "Module" ,           dd_ $ toText $ moduleNameString $ moduleName $ hie_module hieFile
-    , dt_ "Package" ,          dd_ $ toText $ packageName <> "-" <> packageVersion
+    , dt_ "Package" ,          dd_ $ toText $ packageName <> fromMaybe "" (("-" <>) <$> packageVersion)
     ]
   where
     dt_ = dt [] . one . text
@@ -381,10 +381,13 @@ showSrcSpan (UnhelpfulSpan s) = toText $ unpackFS s
 --   e.g. attoparsec-0.13.2.3-c26ea5327ea5e6e18a489b8b0eafa786f8941a0f85bf09f83aa8c5760fca2d79
 --
 -- NOTE: (1), (2) is an assume I made. It maybe wrong.
+--
+-- Encountered a case where unitId is just `main`.
+-- 何故か分からないが取りあえずエラーが出ないようにする。
 data Package = Package
-  { packageName :: String
-  , packageVersion :: String
-  , packageHash :: String
+  { packageName    :: String
+  , packageVersion :: Maybe String
+  , packageHash    :: Maybe String
   } deriving (Eq, Ord, Show)
 
 modulePackage :: Module -> Package
@@ -395,15 +398,15 @@ modulePackage mod =
   in
     case result of
       [(package,"")] -> package
-      _ -> error "Assumction about unitId broke"
+      _ -> error . toText $ "Unexpected unitId format: " <> unitId
 
 -- e.g. attoparsec-0.13.2.3-c26ea5327ea5e6e18a489b8b0eafa786f8941a0f85bf09f83aa8c5760fca2d79
 parsePackage :: RP.ReadP Package
 parsePackage =
   Package
     <$> do RP.many1 (RP.satisfy $ C.isAlphaNum ||^ (=='_') ||^ (=='-'))
-    <*> do RP.char '-' *> RP.munch1 (C.isNumber ||^ (=='.'))
-    <*> do RP.char '-' *> RP.count 64 (RP.satisfy C.isAlphaNum) <* RP.eof
+    <*> RP.option Nothing (Just <$> do RP.char '-' *> RP.munch1 (C.isNumber ||^ (=='.')))
+    <*> (RP.option Nothing (Just <$> do RP.char '-' *> RP.count 64 (RP.satisfy C.isAlphaNum))) <* RP.eof
 
 -- Handling scroll
 -- Current `cocure` (native) interface doesn't offer scroll set freature.
@@ -588,7 +591,7 @@ onDynamic dy m = uncurry go =<< liftIO (atomically (readDynamic dy))
         Right v -> pure v
 
 -- Local Variables:
--- dante-repl-command-line: ("cabal" "new-repl" "exe:pache" "--allow-newer")
+-- dante-repl-command-line: ("cabal" "new-repl" "exe:hie-viewer" "--allow-newer")
 -- eval: (dante-mode)
 -- eval: (flycheck-mode)
 -- End:
