@@ -57,8 +57,8 @@ main = do
   main' hiePath
 
 up = rapid 0 \r -> do
-  -- restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
-  restart r "server" $ main' "/home/sino/workspace/hies/UtilsCodegen.hie"
+  restart r "server" $ main' "/home/sino/workspace/hies/Relude/Extra/Map.hie"
+  -- restart r "server" $ main' "/home/sino/workspace/hies/UtilsCodegen.hie"
 
 main' hiePath = do
   dynFlags <- dynFlagsForPrinting
@@ -125,6 +125,7 @@ cssStyle = do
   hieAstStyle
   leftPainStyle
   treeViewStyle
+  sourceViewStyle
 
 getSpan :: RealSrcSpan -> _
 getSpan s =
@@ -238,8 +239,8 @@ hieAstStyle = do
     ".ident-module-name" ? do
       "> h4" ? do
         "display" .= "inline-block"
-        "min-width" .= "3em"
-        "text-align" .= "center"
+        -- "min-width" .= "3em"
+        -- "text-align" .= "center"
         "padding" .= "0.2em 0.5em"
         "border" .= "0.15em dashed grey"
         "margin-top" .= "0"
@@ -432,13 +433,13 @@ sourceView src dyHlSpan = do
       "source-view-line-" <> show i
 
     container_ =
-      div [ style [ ("padding", "0.5em 0px") ] ]
+      div [ className "source-view" ]
 
     line_ sp (i, txt) =
       div
-        [ CR.id (lineId i), style [ ("white-space", "pre"), ("font-family", "monospace"), ("display", "grid"), ("grid-template-columns", "3em 1fr") ] ]
-        [ div [ style [ ("grid-column", "1"), ("text-align", "right"), ("padding", "0px 0.5em") ] ] [ text $ show (i+1) ]
-        , div [ style [ ("grid-column", "2") ] ] (lineBody_ sp (i,txt))
+        [ className "source-view-line", CR.id (lineId i) ]
+        [ div [ className "source-view-line-lineno"  ] [ text $ show (i+1) ]
+        , div [ className "source-view-line-content" ] (lineBody_ sp (i,txt))
         ]
 
     lineBody_ ((startLineNo, startCol), (endLineNo, endCol)) (lineNo, txt)
@@ -452,6 +453,25 @@ sourceView src dyHlSpan = do
         in [ text a, hl_ b, text c ]
       where
         hl_ txt = span [ style [ ("background-color", "#e0d668") ] ] [ text txt ]
+
+sourceViewStyle = do
+  ".source-view" ? do
+    "padding" .= "0.5em 0px"
+
+    "> .source-view-line" ? do
+       "white-space" .= "pre"
+       "font-family" .= "monospace"
+       "display" .= "grid"
+       "grid-template-columns" .= "3em 1fr"
+
+       "> .source-view-line-lineno" ? do
+         "grid-column" .= "1"
+         "text-align" .= "right"
+         "padding" .= "0px 0.5em"
+         "color" .= "#97a1a7"
+
+       "> .source-view-line-content" ? do
+         "grid-column" .= "2"
 
 {-
 tree view状態をどのように表現するかが肝。
