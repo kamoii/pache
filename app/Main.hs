@@ -207,8 +207,6 @@ exports_ hieFile = do
   ul [] $ map (li [] . one. export_ curMod) exports
   where
     export_ curMod (Avail name) = do
-      -- Name sort must be `external` so there shoud be a module.
-      let Just mod = Name.nameModule_maybe name
       div [ className "export-name" ]
         [ h4  [] [ text . toText . occNameString $ nameOccName name ]
         , div [] $ intersperse (br [])
@@ -221,8 +219,6 @@ exports_ hieFile = do
     export_ curMod (AvailTC name _ _) =
       text . toText . occNameString $ nameOccName name
 
-    dt_ = dt [] . one . text
-    dd_ = dd [] . one . text
 
 hieAstStyle = do
   "table.hie-ast" ? do
